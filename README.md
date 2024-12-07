@@ -1,29 +1,19 @@
 # groq-mcp-test MCP Server
 
-A Model Context Protocol server
+A Model Context Protocol server that provides access to Groq's LLM API.
 
-This is a TypeScript-based MCP server that implements a simple notes system. It demonstrates core MCP concepts by providing:
+This is a TypeScript-based MCP server that implements a chat completion interface using Groq's API. It demonstrates core MCP concepts by providing:
 
-- Resources representing text notes with URIs and metadata
-- Tools for creating new notes
-- Prompts for generating summaries of notes
+- Tools for running chat completions via Groq's API
+- Environment variable configuration for API access
 
 ## Features
 
-### Resources
-- List and access notes via `note://` URIs
-- Each note has a title, content and metadata
-- Plain text mime type for simple content access
-
 ### Tools
-- `create_note` - Create new text notes
-  - Takes title and content as required parameters
-  - Stores note in server state
-
-### Prompts
-- `summarize_notes` - Generate a summary of all stored notes
-  - Includes all note contents as embedded resources
-  - Returns structured prompt for LLM summarization
+- `chat_completion` - Run chat completions via Groq's API
+  - Takes messages array and optional parameters
+  - Returns LLM response
+  - Configurable temperature, max_tokens, etc.
 
 ## Development
 
@@ -40,6 +30,13 @@ npm run build
 For development with auto-rebuild:
 ```bash
 npm run watch
+```
+
+## Configuration
+
+Set your Groq API key in the environment:
+```bash
+export GROQ_API_KEY=your-api-key-here
 ```
 
 ## Installation
