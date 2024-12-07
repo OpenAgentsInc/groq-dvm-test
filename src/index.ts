@@ -1,42 +1,24 @@
 #!/usr/bin/env node
 
 /**
- * This is a template MCP server that implements a simple notes system.
- * It demonstrates core MCP concepts like resources and tools by allowing:
- * - Listing notes as resources
- * - Reading individual notes
- * - Creating new notes via a tool
- * - Summarizing all notes via a prompt
+ * This is an MCP server that provides access to Groq's LLM API.
+ * It demonstrates core MCP concepts by implementing a chat completion tool
+ * that interfaces with Groq's API.
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
-  ListResourcesRequestSchema,
   ListToolsRequestSchema,
-  ReadResourceRequestSchema,
-  ListPromptsRequestSchema,
-  GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { Groq } from "groq";
+
+// Initialize Groq client with API key from environment
+const groq = new Groq(process.env.GROQ_API_KEY);
 
 /**
- * Type alias for a note object.
- */
-type Note = { title: string, content: string };
-
-/**
- * Simple in-memory storage for notes.
- * In a real implementation, this would likely be backed by a database.
- */
-const notes: { [id: string]: Note } = {
-  "1": { title: "First Note", content: "This is note 1" },
-  "2": { title: "Second Note", content: "This is note 2" }
-};
-
-/**
- * Create an MCP server with capabilities for resources (to list/read notes),
- * tools (to create new notes), and prompts (to summarize notes).
+ * Create an MCP server with capabilities for tools to run chat completions
  */
 const server = new Server(
   {
@@ -45,166 +27,111 @@ const server = new Server(
   },
   {
     capabilities: {
-      resources: {},
       tools: {},
-      prompts: {},
     },
   }
 );
 
 /**
- * Handler for listing available notes as resources.
- * Each note is exposed as a resource with:
- * - A note:// URI scheme
- * - Plain text MIME type
- * - Human readable name and description (now including the note title)
- */
-server.setRequestHandler(ListResourcesRequestSchema, async () => {
-  return {
-    resources: Object.entries(notes).map(([id, note]) => ({
-      uri: `note:///${id}`,
-      mimeType: "text/plain",
-      name: note.title,
-      description: `A text note: ${note.title}`
-    }))
-  };
-});
-
-/**
- * Handler for reading the contents of a specific note.
- * Takes a note:// URI and returns the note content as plain text.
- */
-server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-  const url = new URL(request.params.uri);
-  const id = url.pathname.replace(/^\//, '');
-  const note = notes[id];
-
-  if (!note) {
-    throw new Error(`Note ${id} not found`);
-  }
-
-  return {
-    contents: [{
-      uri: request.params.uri,
-      mimeType: "text/plain",
-      text: note.content
-    }]
-  };
-});
-
-/**
  * Handler that lists available tools.
- * Exposes a single "create_note" tool that lets clients create new notes.
+ * Exposes a single "chat_completion" tool that lets clients run Groq chat completions.
  */
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
-        name: "create_note",
-        description: "Create a new note",
+        name: "chat_completion",
+        description: "Run a chat completion via Groq's API",
         inputSchema: {
           type: "object",
           properties: {
-            title: {
-              type: "string",
-              description: "Title of the note"
+            messages: {
+              type: "array",
+              description: "Array of messages to send to the model",
+              items: {
+                type: "object",
+                properties: {
+                  role: {
+                    type: "string",
+                    description: "Role of the message sender (system, user, or assistant)",
+                  },
+                  content: {
+                    type: "string",
+                    description: "Content of the message",
+                  },
+                },
+                required: ["role", "content"],
+              },
             },
-            content: {
+            model: {
               type: "string",
-              description: "Text content of the note"
-            }
+              description: "Model to use for completion (e.g. llama3-8b-8192)",
+            },
+            temperature: {
+              type: "number",
+              description: "Sampling temperature (0-1)",
+            },
+            max_tokens: {
+              type: "number", 
+              description: "Maximum tokens to generate",
+            },
+            top_p: {
+              type: "number",
+              description: "Nucleus sampling parameter",
+            },
+            stream: {
+              type: "boolean",
+              description: "Whether to stream the response",
+            },
           },
-          required: ["title", "content"]
-        }
-      }
-    ]
+          required: ["messages", "model"],
+        },
+      },
+    ],
   };
 });
 
 /**
- * Handler for the create_note tool.
- * Creates a new note with the provided title and content, and returns success message.
+ * Handler for the chat_completion tool.
+ * Runs a chat completion via Groq's API with the provided parameters.
  */
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  switch (request.params.name) {
-    case "create_note": {
-      const title = String(request.params.arguments?.title);
-      const content = String(request.params.arguments?.content);
-      if (!title || !content) {
-        throw new Error("Title and content are required");
-      }
-
-      const id = String(Object.keys(notes).length + 1);
-      notes[id] = { title, content };
-
-      return {
-        content: [{
-          type: "text",
-          text: `Created note ${id}: ${title}`
-        }]
-      };
-    }
-
-    default:
-      throw new Error("Unknown tool");
-  }
-});
-
-/**
- * Handler that lists available prompts.
- * Exposes a single "summarize_notes" prompt that summarizes all notes.
- */
-server.setRequestHandler(ListPromptsRequestSchema, async () => {
-  return {
-    prompts: [
-      {
-        name: "summarize_notes",
-        description: "Summarize all notes",
-      }
-    ]
-  };
-});
-
-/**
- * Handler for the summarize_notes prompt.
- * Returns a prompt that requests summarization of all notes, with the notes' contents embedded as resources.
- */
-server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-  if (request.params.name !== "summarize_notes") {
-    throw new Error("Unknown prompt");
+  if (request.params.name !== "chat_completion") {
+    throw new Error("Unknown tool");
   }
 
-  const embeddedNotes = Object.entries(notes).map(([id, note]) => ({
-    type: "resource" as const,
-    resource: {
-      uri: `note:///${id}`,
-      mimeType: "text/plain",
-      text: note.content
-    }
-  }));
+  const {
+    messages,
+    model,
+    temperature = 0.7,
+    max_tokens = 1024,
+    top_p = 1,
+    stream = false,
+  } = request.params.arguments || {};
 
-  return {
-    messages: [
-      {
-        role: "user",
-        content: {
-          type: "text",
-          text: "Please summarize the following notes:"
-        }
-      },
-      ...embeddedNotes.map(note => ({
-        role: "user" as const,
-        content: note
-      })),
-      {
-        role: "user",
-        content: {
-          type: "text",
-          text: "Provide a concise summary of all the notes above."
-        }
-      }
-    ]
-  };
+  if (!messages || !model) {
+    throw new Error("Messages and model are required");
+  }
+
+  try {
+    const completion = await groq.chat.completions.create({
+      messages,
+      model,
+      temperature,
+      max_tokens,
+      top_p,
+      stream,
+    });
+
+    return {
+      content: [{
+        type: "text",
+        text: completion.choices[0].message.content,
+      }],
+    };
+  } catch (error) {
+    throw new Error(`Groq API error: ${error.message}`);
+  }
 });
 
 /**
@@ -212,6 +139,11 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
  * This allows the server to communicate via standard input/output streams.
  */
 async function main() {
+  // Verify GROQ_API_KEY is set
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error("GROQ_API_KEY environment variable must be set");
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
