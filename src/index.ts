@@ -6,16 +6,15 @@
  * that interfaces with Groq's API.
  */
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import Groq from "groq-sdk"
+import { Server } from "@modelcontextprotocol/sdk/server/index.js"
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
-import { Groq } from "groq";
+  CallToolRequestSchema, ListToolsRequestSchema
+} from "@modelcontextprotocol/sdk/types.js"
 
 // Initialize Groq client with API key from environment
-const groq = new Groq(process.env.GROQ_API_KEY);
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 /**
  * Create an MCP server with capabilities for tools to run chat completions
@@ -72,7 +71,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "Sampling temperature (0-1)",
             },
             max_tokens: {
-              type: "number", 
+              type: "number",
               description: "Maximum tokens to generate",
             },
             top_p: {
