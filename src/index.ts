@@ -12,9 +12,13 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema, ListToolsRequestSchema
 } from "@modelcontextprotocol/sdk/types.js"
+import type { ChatCompletionMessageParam } from "groq-sdk"
 
 // Initialize Groq client with API key from environment
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+// Valid Groq models
+type GroqModel = "gemma-7b-it" | "llama3-70b-8192" | "llama3-8b-8192" | "mixtral-8x7b-32768";
 
 /**
  * Create an MCP server with capabilities for tools to run chat completions
@@ -53,6 +57,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                   role: {
                     type: "string",
                     description: "Role of the message sender (system, user, or assistant)",
+                    enum: ["system", "user", "assistant"],
                   },
                   content: {
                     type: "string",
@@ -64,7 +69,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             model: {
               type: "string",
-              description: "Model to use for completion (e.g. llama3-8b-8192)",
+              description: "Model to use for completion",
+              enum: ["gemma-7b-it", "llama3-70b-8192", "llama3-8b-8192", "mixtral-8x7b-32768"],
             },
             temperature: {
               type: "number",
@@ -99,18 +105,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     throw new Error("Unknown tool");
   }
 
-  const {
-    messages,
-    model,
-    temperature = 0.7,
-    max_tokens = 1024,
-    top_p = 1,
-    stream = false,
-  } = request.params.arguments || {};
-
-  if (!messages || !model) {
-    throw new Error("Messages and model are required");
+  const args = request.params.arguments || {};
+  
+  // Type check and validate messages
+  if (!Array.isArray(args.messages) || !args.messages.length) {
+    throw new Error("Messages must be a non-empty array");
   }
+
+  const messages = args.messages as ChatCompletionMessageParam[];
+  const model = args.model as GroqModel;
+
+  if (!model) {
+    throw new Error("Model is required");
+  }
+
+  // Validate optional parameters
+  const temperature = typeof args.temperature === 'number' ? args.temperature : 0.7;
+  const max_tokens = typeof args.max_tokens === 'number' ? args.max_tokens : 1024;
+  const top_p = typeof args.top_p === 'number' ? args.top_p : 1;
+  const stream = typeof args.stream === 'boolean' ? args.stream : false;
 
   try {
     const completion = await groq.chat.completions.create({
@@ -128,8 +141,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         text: completion.choices[0].message.content,
       }],
     };
-  } catch (error) {
-    throw new Error(`Groq API error: ${error.message}`);
+  } catch (err) {
+    // Type guard for Error objects
+    if (err instanceof Error) {
+      throw new Error(`Groq API error: ${err.message}`);
+    }
+    // Fallback for unknown error types
+    throw new Error("Groq API error: An unknown error occurred");
   }
 });
 
