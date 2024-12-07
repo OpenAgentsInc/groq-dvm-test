@@ -12,7 +12,6 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema, ListToolsRequestSchema
 } from "@modelcontextprotocol/sdk/types.js"
-import type { ChatCompletionMessageParam } from "groq-sdk"
 
 // Initialize Groq client with API key from environment
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -106,13 +105,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   const args = request.params.arguments || {};
-  
+
   // Type check and validate messages
   if (!Array.isArray(args.messages) || !args.messages.length) {
     throw new Error("Messages must be a non-empty array");
   }
 
-  const messages = args.messages as ChatCompletionMessageParam[];
+  const messages = args.messages
   const model = args.model as GroqModel;
 
   if (!model) {
@@ -123,7 +122,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const temperature = typeof args.temperature === 'number' ? args.temperature : 0.7;
   const max_tokens = typeof args.max_tokens === 'number' ? args.max_tokens : 1024;
   const top_p = typeof args.top_p === 'number' ? args.top_p : 1;
-  const stream = typeof args.stream === 'boolean' ? args.stream : false;
+  const stream = false //typeof args.stream === 'boolean' ? args.stream : false;
 
   try {
     const completion = await groq.chat.completions.create({
