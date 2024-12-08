@@ -1,8 +1,22 @@
-import { Event, getEventHash, getPublicKey, signEvent } from 'nostr-tools';
-import { JobFeedback, JobRequest, JobResult, NostrKind } from './types';
+import { Event, getEventHash, generatePrivateKey, getPublicKey, SimplePool } from 'nostr-tools';
+import { JobFeedback, JobRequest, JobResult, NostrKind } from './types.js';
+import { schnorr } from '@noble/curves/secp256k1';
+import { bytesToHex } from '@noble/hashes/utils';
+
+// Helper function to convert hex to Uint8Array
+function hexToBytes(hex: string): Uint8Array {
+  return new Uint8Array(hex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+}
+
+// Helper function to sign an event
+function signEvent(event: Event, privateKey: string): string {
+  const hash = getEventHash(event);
+  const sig = schnorr.sign(hash, hexToBytes(privateKey));
+  return bytesToHex(sig);
+}
 
 export function createHandlerAdvertisement(privateKey: string): Event {
-  const pubkey = getPublicKey(privateKey);
+  const pubkey = getPublicKey(hexToBytes(privateKey));
   
   const event: Event = {
     kind: NostrKind.APP_HANDLER,
@@ -71,7 +85,7 @@ export function parseJobRequest(event: Event): JobRequest | null {
 }
 
 export function createJobResult(result: JobResult, privateKey: string): Event {
-  const pubkey = getPublicKey(privateKey);
+  const pubkey = getPublicKey(hexToBytes(privateKey));
   
   const event: Event = {
     kind: NostrKind.JOB_RESULT,
@@ -81,7 +95,7 @@ export function createJobResult(result: JobResult, privateKey: string): Event {
       ['p', result.customerPubkey],
       ['request', JSON.stringify(result.request)]
     ],
-    content: result.content,
+    content: result.content || '',
     pubkey,
     id: '',
     sig: ''
@@ -94,7 +108,7 @@ export function createJobResult(result: JobResult, privateKey: string): Event {
 }
 
 export function createJobFeedback(feedback: JobFeedback, privateKey: string): Event {
-  const pubkey = getPublicKey(privateKey);
+  const pubkey = getPublicKey(hexToBytes(privateKey));
   
   const event: Event = {
     kind: NostrKind.JOB_FEEDBACK,
