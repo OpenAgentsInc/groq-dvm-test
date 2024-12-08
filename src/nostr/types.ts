@@ -14,8 +14,10 @@ export interface JobRequest {
   temperature?: number;
   max_tokens?: number;
   top_p?: number;
+  top_k?: number;
+  frequency_penalty?: number;
   input: string;
-  inputType: 'text' | 'url' | 'event' | 'job';
+  inputType: 'text' | 'url' | 'event' | 'job' | 'prompt';
   relay?: string;
   marker?: string;
 }
@@ -37,8 +39,8 @@ export interface JobFeedback {
 
 // NIP-90 event kinds
 export const enum NostrKind {
-  JOB_REQUEST = 5100,  // LLM completion request
-  JOB_RESULT = 6100,   // LLM completion result
+  JOB_REQUEST = 5050,  // Text generation request
+  JOB_RESULT = 6050,   // Text generation result
   JOB_FEEDBACK = 7000, // Job status/feedback
   APP_HANDLER = 31990  // NIP-89 handler advertisement
 }
