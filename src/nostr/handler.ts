@@ -1,7 +1,7 @@
 import { Event, SimplePool } from 'nostr-tools';
 import WebSocket from 'ws';
-import { NostrConfig, NostrKind } from './types';
-import { createHandlerAdvertisement, createJobFeedback, createJobResult, parseJobRequest } from './events';
+import { NostrConfig, NostrKind } from './types.js';
+import { createHandlerAdvertisement, createJobFeedback, createJobResult, parseJobRequest } from './events.js';
 import { Groq } from 'groq-sdk';
 
 // Polyfill WebSocket for nostr-tools
@@ -11,6 +11,7 @@ export class NostrHandler {
   private pool: SimplePool;
   private groq: Groq;
   private config: NostrConfig;
+  private subscriptions: { [key: string]: () => void } = {};
 
   constructor(config: NostrConfig, groq: Groq) {
     this.pool = new SimplePool();
@@ -43,27 +44,32 @@ export class NostrHandler {
   private async publishHandlerAd() {
     const event = createHandlerAdvertisement(this.config.privateKey);
     try {
-      await this.pool.publish(this.config.relays, event);
-      console.log('Published handler advertisement');
+      const pubs = await Promise.all(this.pool.publish(this.config.relays, event));
+      console.log('Published handler advertisement:', pubs);
     } catch (error) {
       console.error('Failed to publish handler advertisement:', error);
     }
   }
 
   private subscribeToRequests() {
-    const sub = this.pool.sub(this.config.relays, [{
-      kinds: [NostrKind.JOB_REQUEST],
-    }]);
+    const sub = this.pool.subscribeMany(
+      this.config.relays,
+      [{ kinds: [NostrKind.JOB_REQUEST] }],
+      {
+        onevent: async (event: Event) => {
+          // Check if we should process this request
+          if (this.config.allowedPubkey && event.pubkey !== this.config.allowedPubkey) {
+            console.log(`Ignoring request from unauthorized pubkey: ${event.pubkey}`);
+            return;
+          }
 
-    sub.on('event', async (event: Event) => {
-      // Check if we should process this request
-      if (this.config.allowedPubkey && event.pubkey !== this.config.allowedPubkey) {
-        console.log(`Ignoring request from unauthorized pubkey: ${event.pubkey}`);
-        return;
+          await this.handleJobRequest(event);
+        }
       }
+    );
 
-      await this.handleJobRequest(event);
-    });
+    // Store subscription for cleanup
+    this.subscriptions['requests'] = () => sub.close();
   }
 
   private async handleJobRequest(event: Event) {
@@ -94,11 +100,13 @@ export class NostrHandler {
         stream: false
       });
 
+      const content = completion.choices[0].message.content;
+
       // Publish result
       await this.publishResult({
         requestId: request.id,
         customerPubkey: request.pubkey,
-        content: completion.choices[0].message.content,
+        content,
         request: event
       });
 
@@ -125,13 +133,13 @@ export class NostrHandler {
   private async publishResult(result: {
     requestId: string;
     customerPubkey: string;
-    content: string;
+    content: string | null;
     request: Event;
   }) {
     const event = createJobResult(result, this.config.privateKey);
     try {
-      await this.pool.publish(this.config.relays, event);
-      console.log('Published job result:', event.id);
+      const pubs = await Promise.all(this.pool.publish(this.config.relays, event));
+      console.log('Published job result:', event.id, pubs);
     } catch (error) {
       console.error('Failed to publish job result:', error);
     }
@@ -146,14 +154,18 @@ export class NostrHandler {
   }) {
     const event = createJobFeedback(feedback, this.config.privateKey);
     try {
-      await this.pool.publish(this.config.relays, event);
-      console.log('Published job feedback:', event.id);
+      const pubs = await Promise.all(this.pool.publish(this.config.relays, event));
+      console.log('Published job feedback:', event.id, pubs);
     } catch (error) {
       console.error('Failed to publish job feedback:', error);
     }
   }
 
   async stop() {
-    await this.pool.close();
+    // Close all subscriptions
+    Object.values(this.subscriptions).forEach(close => close());
+    
+    // Close all relay connections
+    this.pool.close(this.config.relays);
   }
 }
