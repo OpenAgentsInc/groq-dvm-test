@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
-import { generatePrivateKey, getPublicKey } from 'nostr-tools';
+import { getPublicKey } from 'nostr-tools';
+import { randomBytes } from 'crypto';
 import { bytesToHex } from '@noble/hashes/utils';
 
 function generateKeys() {
-  // Generate a new private key as Uint8Array
-  const privateKeyBytes = generatePrivateKey();
+  // Generate 32 random bytes for private key
+  const privateKeyBytes = randomBytes(32);
   
   // Convert to hex string
   const privateKey = bytesToHex(privateKeyBytes);
