@@ -7,10 +7,37 @@ import { Groq } from 'groq-sdk';
 // Polyfill WebSocket for nostr-tools
 (global as any).WebSocket = WebSocket;
 
-// Relays with kind restrictions
-const RESTRICTED_RELAYS = new Set([
-  'wss://purplepag.es'
-]);
+// Helper function to delay execution
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Helper function to retry with exponential backoff
+async function retry<T>(
+  operation: () => Promise<T>,
+  maxAttempts: number = 3,
+  baseDelay: number = 1000
+): Promise<T> {
+  let lastError: any;
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      lastError = error;
+      if (attempt === maxAttempts) break;
+      
+      // If it's a rate limit error, wait longer
+      const isRateLimit = error.message?.includes('rate-limit');
+      const waitTime = isRateLimit ? 
+        baseDelay * Math.pow(2, attempt) * (1 + Math.random()) : // Exponential backoff with jitter
+        baseDelay; // Regular delay for other errors
+      
+      console.log(`Attempt ${attempt} failed, retrying in ${Math.round(waitTime/1000)}s...`);
+      await delay(waitTime);
+    }
+  }
+  
+  throw lastError;
+}
 
 export class NostrHandler {
   private pool: SimplePool;
@@ -48,13 +75,11 @@ export class NostrHandler {
 
   private async publishHandlerAd() {
     const event = createHandlerAdvertisement(this.config.privateKey);
-    
-    // Filter out restricted relays for handler advertisement
-    const publishRelays = this.config.relays.filter(relay => !RESTRICTED_RELAYS.has(relay));
-    
     try {
-      await Promise.all(this.pool.publish(publishRelays, event));
-      console.log('Published handler advertisement');
+      await retry(async () => {
+        await Promise.all(this.pool.publish(this.config.relays, event));
+        console.log('Published handler advertisement');
+      });
     } catch (error) {
       console.error('Failed to publish handler advertisement:', error);
     }
@@ -89,10 +114,12 @@ export class NostrHandler {
 
     try {
       // Send processing status
-      await this.publishFeedback({
-        requestId: request.id,
-        customerPubkey: request.pubkey,
-        status: 'processing'
+      await retry(async () => {
+        await this.publishFeedback({
+          requestId: request.id,
+          customerPubkey: request.pubkey,
+          status: 'processing'
+        });
       });
 
       console.log(`[${event.id.slice(0, 8)}] Processing request from ${event.pubkey.slice(0, 8)}`);
@@ -112,35 +139,46 @@ export class NostrHandler {
 
       const content = completion.choices[0].message.content;
 
-      // Filter out restricted relays for results
-      const publishRelays = this.config.relays.filter(relay => !RESTRICTED_RELAYS.has(relay));
+      // Add a small delay before publishing result
+      await delay(1000);
 
       // Publish result
-      await this.publishResult({
-        requestId: request.id,
-        customerPubkey: request.pubkey,
-        content,
-        request: event
-      }, publishRelays);
+      await retry(async () => {
+        await this.publishResult({
+          requestId: request.id,
+          customerPubkey: request.pubkey,
+          content,
+          request: event
+        });
+      });
 
       console.log(`[${event.id.slice(0, 8)}] Request completed`);
 
+      // Add a small delay before publishing success
+      await delay(1000);
+
       // Send success status
-      await this.publishFeedback({
-        requestId: request.id,
-        customerPubkey: request.pubkey,
-        status: 'success'
+      await retry(async () => {
+        await this.publishFeedback({
+          requestId: request.id,
+          customerPubkey: request.pubkey,
+          status: 'success'
+        });
       });
 
     } catch (error) {
       console.error(`[${event.id.slice(0, 8)}] Error:`, error);
       
+      await delay(1000);
+
       // Send error status
-      await this.publishFeedback({
-        requestId: request.id,
-        customerPubkey: request.pubkey,
-        status: 'error',
-        extraInfo: error instanceof Error ? error.message : 'Unknown error'
+      await retry(async () => {
+        await this.publishFeedback({
+          requestId: request.id,
+          customerPubkey: request.pubkey,
+          status: 'error',
+          extraInfo: error instanceof Error ? error.message : 'Unknown error'
+        });
       });
     }
   }
@@ -150,14 +188,13 @@ export class NostrHandler {
     customerPubkey: string;
     content: string | null;
     request: Event;
-  }, relays?: string[]) {
+  }) {
     const event = createJobResult(result, this.config.privateKey);
-    const publishRelays = relays || this.config.relays.filter(relay => !RESTRICTED_RELAYS.has(relay));
-    
     try {
-      await Promise.all(this.pool.publish(publishRelays, event));
+      await Promise.all(this.pool.publish(this.config.relays, event));
     } catch (error) {
       console.error(`[${result.requestId.slice(0, 8)}] Failed to publish result:`, error);
+      throw error; // Allow retry to catch this
     }
   }
 
@@ -169,12 +206,11 @@ export class NostrHandler {
     content?: string;
   }) {
     const event = createJobFeedback(feedback, this.config.privateKey);
-    const publishRelays = this.config.relays.filter(relay => !RESTRICTED_RELAYS.has(relay));
-    
     try {
-      await Promise.all(this.pool.publish(publishRelays, event));
+      await Promise.all(this.pool.publish(this.config.relays, event));
     } catch (error) {
       console.error(`[${feedback.requestId.slice(0, 8)}] Failed to publish feedback:`, error);
+      throw error; // Allow retry to catch this
     }
   }
 
