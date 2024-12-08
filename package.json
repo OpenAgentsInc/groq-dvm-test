@@ -6,18 +6,20 @@
   "type": "module",
   "bin": {
     "groq-mcp-test": "./build/index.js",
-    "generate-nostr-key": "./build/utils/generate-key.js"
+    "generate-nostr-key": "./build/utils/generate-key.js",
+    "test-groq-request": "./build/utils/test-request.js"
   },
   "files": [
     "build"
   ],
   "scripts": {
     "build": "tsc",
-    "postbuild": "chmod +x build/index.js build/utils/generate-key.js",
+    "postbuild": "chmod +x build/index.js build/utils/generate-key.js build/utils/test-request.js",
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
-    "generate-key": "node build/utils/generate-key.js"
+    "generate-key": "node build/utils/generate-key.js",
+    "test-request": "node build/utils/test-request.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "0.6.0",
