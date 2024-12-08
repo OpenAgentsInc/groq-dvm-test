@@ -7,6 +7,11 @@ import { Groq } from 'groq-sdk';
 // Polyfill WebSocket for nostr-tools
 (global as any).WebSocket = WebSocket;
 
+// Relays with kind restrictions
+const RESTRICTED_RELAYS = new Set([
+  'wss://purplepag.es'
+]);
+
 export class NostrHandler {
   private pool: SimplePool;
   private groq: Groq;
@@ -43,8 +48,12 @@ export class NostrHandler {
 
   private async publishHandlerAd() {
     const event = createHandlerAdvertisement(this.config.privateKey);
+    
+    // Filter out restricted relays for handler advertisement
+    const publishRelays = this.config.relays.filter(relay => !RESTRICTED_RELAYS.has(relay));
+    
     try {
-      const pubs = await Promise.all(this.pool.publish(this.config.relays, event));
+      await Promise.all(this.pool.publish(publishRelays, event));
       console.log('Published handler advertisement');
     } catch (error) {
       console.error('Failed to publish handler advertisement:', error);
@@ -103,13 +112,16 @@ export class NostrHandler {
 
       const content = completion.choices[0].message.content;
 
+      // Filter out restricted relays for results
+      const publishRelays = this.config.relays.filter(relay => !RESTRICTED_RELAYS.has(relay));
+
       // Publish result
       await this.publishResult({
         requestId: request.id,
         customerPubkey: request.pubkey,
         content,
         request: event
-      });
+      }, publishRelays);
 
       console.log(`[${event.id.slice(0, 8)}] Request completed`);
 
@@ -138,10 +150,12 @@ export class NostrHandler {
     customerPubkey: string;
     content: string | null;
     request: Event;
-  }) {
+  }, relays?: string[]) {
     const event = createJobResult(result, this.config.privateKey);
+    const publishRelays = relays || this.config.relays.filter(relay => !RESTRICTED_RELAYS.has(relay));
+    
     try {
-      await Promise.all(this.pool.publish(this.config.relays, event));
+      await Promise.all(this.pool.publish(publishRelays, event));
     } catch (error) {
       console.error(`[${result.requestId.slice(0, 8)}] Failed to publish result:`, error);
     }
@@ -155,8 +169,10 @@ export class NostrHandler {
     content?: string;
   }) {
     const event = createJobFeedback(feedback, this.config.privateKey);
+    const publishRelays = this.config.relays.filter(relay => !RESTRICTED_RELAYS.has(relay));
+    
     try {
-      await Promise.all(this.pool.publish(this.config.relays, event));
+      await Promise.all(this.pool.publish(publishRelays, event));
     } catch (error) {
       console.error(`[${feedback.requestId.slice(0, 8)}] Failed to publish feedback:`, error);
     }
