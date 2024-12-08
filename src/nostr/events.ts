@@ -1,4 +1,4 @@
-import { Event, getEventHash, generatePrivateKey, getPublicKey, SimplePool } from 'nostr-tools';
+import { Event, getEventHash, getPublicKey, SimplePool } from 'nostr-tools';
 import { JobFeedback, JobRequest, JobResult, NostrKind } from './types.js';
 import { schnorr } from '@noble/curves/secp256k1';
 import { bytesToHex } from '@noble/hashes/utils';
