@@ -10,40 +10,13 @@ import { Groq } from 'groq-sdk';
 // Helper function to delay execution
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper function to retry with exponential backoff
-async function retry<T>(
-  operation: () => Promise<T>,
-  maxAttempts: number = 3,
-  baseDelay: number = 1000
-): Promise<T> {
-  let lastError: any;
-  
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await operation();
-    } catch (error: any) {
-      lastError = error;
-      if (attempt === maxAttempts) break;
-      
-      // If it's a rate limit error, wait longer
-      const isRateLimit = error.message?.includes('rate-limit');
-      const waitTime = isRateLimit ? 
-        baseDelay * Math.pow(2, attempt) * (1 + Math.random()) : // Exponential backoff with jitter
-        baseDelay; // Regular delay for other errors
-      
-      console.log(`Attempt ${attempt} failed, retrying in ${Math.round(waitTime/1000)}s...`);
-      await delay(waitTime);
-    }
-  }
-  
-  throw lastError;
-}
-
 export class NostrHandler {
   private pool: SimplePool;
   private groq: Groq;
   private config: NostrConfig;
   private subscriptions: { [key: string]: () => void } = {};
+  private isProcessing: boolean = false;
+  private requestQueue: Event[] = [];
 
   constructor(config: NostrConfig, groq: Groq) {
     this.pool = new SimplePool();
@@ -76,10 +49,8 @@ export class NostrHandler {
   private async publishHandlerAd() {
     const event = createHandlerAdvertisement(this.config.privateKey);
     try {
-      await retry(async () => {
-        await Promise.all(this.pool.publish(this.config.relays, event));
-        console.log('Published handler advertisement');
-      });
+      await Promise.all(this.pool.publish(this.config.relays, event));
+      console.log('Published handler advertisement');
     } catch (error) {
       console.error('Failed to publish handler advertisement:', error);
     }
@@ -97,13 +68,36 @@ export class NostrHandler {
             return;
           }
 
-          await this.handleJobRequest(event);
+          // Add to queue and process if not already processing
+          this.requestQueue.push(event);
+          this.processNextRequest();
         }
       }
     );
 
     // Store subscription for cleanup
     this.subscriptions['requests'] = () => sub.close();
+  }
+
+  private async processNextRequest() {
+    // If already processing or queue is empty, do nothing
+    if (this.isProcessing || this.requestQueue.length === 0) {
+      return;
+    }
+
+    this.isProcessing = true;
+    const event = this.requestQueue.shift()!;
+
+    try {
+      await this.handleJobRequest(event);
+    } catch (error) {
+      console.error(`[${event.id.slice(0, 8)}] Failed to process request:`, error);
+    } finally {
+      // Wait a bit before processing next request to avoid rate limits
+      await delay(2000);
+      this.isProcessing = false;
+      this.processNextRequest();
+    }
   }
 
   private async handleJobRequest(event: Event) {
@@ -114,12 +108,10 @@ export class NostrHandler {
 
     try {
       // Send processing status
-      await retry(async () => {
-        await this.publishFeedback({
-          requestId: request.id,
-          customerPubkey: request.pubkey,
-          status: 'processing'
-        });
+      await this.publishFeedback({
+        requestId: request.id,
+        customerPubkey: request.pubkey,
+        status: 'processing'
       });
 
       console.log(`[${event.id.slice(0, 8)}] Processing request from ${event.pubkey.slice(0, 8)}`);
@@ -140,45 +132,39 @@ export class NostrHandler {
       const content = completion.choices[0].message.content;
 
       // Add a small delay before publishing result
-      await delay(1000);
+      await delay(2000);
 
       // Publish result
-      await retry(async () => {
-        await this.publishResult({
-          requestId: request.id,
-          customerPubkey: request.pubkey,
-          content,
-          request: event
-        });
+      await this.publishResult({
+        requestId: request.id,
+        customerPubkey: request.pubkey,
+        content,
+        request: event
       });
 
       console.log(`[${event.id.slice(0, 8)}] Request completed`);
 
       // Add a small delay before publishing success
-      await delay(1000);
+      await delay(2000);
 
       // Send success status
-      await retry(async () => {
-        await this.publishFeedback({
-          requestId: request.id,
-          customerPubkey: request.pubkey,
-          status: 'success'
-        });
+      await this.publishFeedback({
+        requestId: request.id,
+        customerPubkey: request.pubkey,
+        status: 'success'
       });
 
     } catch (error) {
       console.error(`[${event.id.slice(0, 8)}] Error:`, error);
       
-      await delay(1000);
+      await delay(2000);
 
       // Send error status
-      await retry(async () => {
-        await this.publishFeedback({
-          requestId: request.id,
-          customerPubkey: request.pubkey,
-          status: 'error',
-          extraInfo: error instanceof Error ? error.message : 'Unknown error'
-        });
+      await this.publishFeedback({
+        requestId: request.id,
+        customerPubkey: request.pubkey,
+        status: 'error',
+        extraInfo: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   }
@@ -194,7 +180,7 @@ export class NostrHandler {
       await Promise.all(this.pool.publish(this.config.relays, event));
     } catch (error) {
       console.error(`[${result.requestId.slice(0, 8)}] Failed to publish result:`, error);
-      throw error; // Allow retry to catch this
+      throw error;
     }
   }
 
@@ -210,7 +196,7 @@ export class NostrHandler {
       await Promise.all(this.pool.publish(this.config.relays, event));
     } catch (error) {
       console.error(`[${feedback.requestId.slice(0, 8)}] Failed to publish feedback:`, error);
-      throw error; // Allow retry to catch this
+      throw error;
     }
   }
 
