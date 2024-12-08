@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-import { SimplePool, getPublicKey, getEventHash } from 'nostr-tools';
-import { bytesToHex } from '@noble/hashes/utils';
-import { schnorr } from '@noble/curves/secp256k1';
-import WebSocket from 'ws';
+import { getEventHash, getPublicKey, SimplePool } from "nostr-tools"
+import WebSocket from "ws"
+import { schnorr } from "@noble/curves/secp256k1"
+import { bytesToHex } from "@noble/hashes/utils"
 
 // Polyfill WebSocket for nostr-tools
 (global as any).WebSocket = WebSocket;
@@ -28,7 +28,7 @@ async function main() {
 
   const privateKey = process.env.NOSTR_PRIVATE_KEY;
   const pubkey = getPublicKey(hexToBytes(privateKey));
-  
+
   // Create a test request
   const event = {
     kind: 5050,
@@ -52,7 +52,7 @@ async function main() {
 
   // Connect to relay and publish
   const pool = new SimplePool();
-  const relay = 'wss://relay.damus.io';
+  const relay = 'wss://nostr-pub.wellorder.net';
 
   try {
     // Publish the request
