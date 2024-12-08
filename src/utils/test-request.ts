@@ -50,27 +50,20 @@ async function main() {
   event.id = getEventHash(event);
   event.sig = signEvent(event, privateKey);
 
-  // Connect to relays and publish
+  // Connect to relay and publish
   const pool = new SimplePool();
-  const relays = [
-    'wss://purplepag.es',
-    'wss://nos.lol',
-    'wss://relay.damus.io',
-    'wss://relay.snort.social',
-    'wss://offchain.pub',
-    'wss://nostr-pub.wellorder.net'
-  ];
+  const relay = 'wss://relay.damus.io';
 
   try {
     // Publish the request
     console.log('Publishing request...');
-    const pubs = await Promise.all(pool.publish(relays, event));
-    console.log('Published to relays:', pubs);
+    const pubs = await Promise.all(pool.publish([relay], event));
+    console.log('Published to relay:', pubs);
 
     // Subscribe to responses
     console.log('Waiting for responses...');
     const sub = pool.subscribeMany(
-      relays,
+      [relay],
       [
         { kinds: [6050], '#e': [event.id] },  // Results
         { kinds: [7000], '#e': [event.id] }   // Feedback
