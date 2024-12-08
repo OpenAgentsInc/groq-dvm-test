@@ -54,21 +54,20 @@ export function parseJobRequest(event: Event): JobRequest | null {
 
     // Skip encrypted requests
     if (event.tags.some(t => t[0] === 'encrypted')) {
-      console.log('Skipping encrypted request:', event.id);
       return null;
     }
 
     // Find input tag
     const inputTag = event.tags.find(t => t[0] === 'i');
     if (!inputTag) {
-      console.log('Missing input tag in request:', event.id);
+      console.log(`[${event.id.slice(0, 8)}] Missing input tag`);
       return null;
     }
 
     // Find model parameter
     const modelTag = event.tags.find(t => t[0] === 'param' && t[1] === 'model');
     if (!modelTag) {
-      console.log('Missing model parameter in request:', event.id);
+      console.log(`[${event.id.slice(0, 8)}] Missing model parameter`);
       return null;
     }
 
@@ -80,7 +79,7 @@ export function parseJobRequest(event: Event): JobRequest | null {
       'mixtral-8x7b-32768'
     ];
     if (!supportedModels.includes(modelTag[2])) {
-      console.log('Unsupported model requested:', modelTag[2], 'in request:', event.id);
+      console.log(`[${event.id.slice(0, 8)}] Unsupported model: ${modelTag[2]}`);
       return null;
     }
 
@@ -107,7 +106,7 @@ export function parseJobRequest(event: Event): JobRequest | null {
       marker: inputTag[4]
     };
   } catch (error) {
-    console.log('Error parsing request:', event.id, error);
+    console.log(`[${event.id.slice(0, 8)}] Parse error: ${error}`);
     return null;
   }
 }
