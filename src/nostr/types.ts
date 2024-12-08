@@ -23,7 +23,7 @@ export interface JobRequest {
 export interface JobResult {
   requestId: string;
   customerPubkey: string;
-  content: string;
+  content: string | null;
   request: Event;
 }
 
