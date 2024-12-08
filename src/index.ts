@@ -4,6 +4,8 @@
  * This is an MCP server that provides access to Groq's LLM API.
  * It demonstrates core MCP concepts by implementing a chat completion tool
  * that interfaces with Groq's API.
+ * 
+ * It also implements NIP-89/90 support to act as a Nostr Data Vending Machine.
  */
 
 import Groq from "groq-sdk"
@@ -12,6 +14,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema, ListToolsRequestSchema
 } from "@modelcontextprotocol/sdk/types.js"
+import { NostrHandler } from "./nostr/handler.js"
+import { NostrConfig } from "./nostr/types.js"
 
 // Initialize Groq client with API key from environment
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -150,6 +154,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
+let nostrHandler: NostrHandler | null = null;
+
 /**
  * Start the server using stdio transport.
  * This allows the server to communicate via standard input/output streams.
@@ -160,9 +166,37 @@ async function main() {
     throw new Error("GROQ_API_KEY environment variable must be set");
   }
 
+  // Initialize Nostr handler if config is present
+  if (process.env.NOSTR_PRIVATE_KEY && process.env.NOSTR_RELAYS) {
+    const config: NostrConfig = {
+      privateKey: process.env.NOSTR_PRIVATE_KEY,
+      relays: process.env.NOSTR_RELAYS.split(','),
+      allowedPubkey: process.env.NOSTR_ALLOWED_PUBKEY // Optional
+    };
+
+    nostrHandler = new NostrHandler(config, groq);
+    await nostrHandler.start();
+    console.log('Nostr DVM handler started');
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
+
+// Handle shutdown
+process.on('SIGINT', async () => {
+  if (nostrHandler) {
+    await nostrHandler.stop();
+  }
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  if (nostrHandler) {
+    await nostrHandler.stop();
+  }
+  process.exit(0);
+});
 
 main().catch((error) => {
   console.error("Server error:", error);
