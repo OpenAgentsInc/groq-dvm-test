@@ -45,7 +45,7 @@ export class NostrHandler {
     const event = createHandlerAdvertisement(this.config.privateKey);
     try {
       const pubs = await Promise.all(this.pool.publish(this.config.relays, event));
-      console.log('Published handler advertisement:', pubs);
+      console.log('Published handler advertisement');
     } catch (error) {
       console.error('Failed to publish handler advertisement:', error);
     }
@@ -59,7 +59,7 @@ export class NostrHandler {
         onevent: async (event: Event) => {
           // Check if we should process this request
           if (this.config.allowedPubkey && event.pubkey !== this.config.allowedPubkey) {
-            console.log(`Ignoring request from unauthorized pubkey: ${event.pubkey}`);
+            console.log(`[${event.id.slice(0, 8)}] Unauthorized pubkey: ${event.pubkey.slice(0, 8)}`);
             return;
           }
 
@@ -75,7 +75,6 @@ export class NostrHandler {
   private async handleJobRequest(event: Event) {
     const request = parseJobRequest(event);
     if (!request) {
-      console.error('Failed to parse job request:', event);
       return;
     }
 
@@ -86,6 +85,8 @@ export class NostrHandler {
         customerPubkey: request.pubkey,
         status: 'processing'
       });
+
+      console.log(`[${event.id.slice(0, 8)}] Processing request from ${event.pubkey.slice(0, 8)}`);
 
       // Process the request
       const completion = await this.groq.chat.completions.create({
@@ -110,6 +111,8 @@ export class NostrHandler {
         request: event
       });
 
+      console.log(`[${event.id.slice(0, 8)}] Request completed`);
+
       // Send success status
       await this.publishFeedback({
         requestId: request.id,
@@ -118,7 +121,7 @@ export class NostrHandler {
       });
 
     } catch (error) {
-      console.error('Error processing request:', error);
+      console.error(`[${event.id.slice(0, 8)}] Error:`, error);
       
       // Send error status
       await this.publishFeedback({
@@ -138,10 +141,9 @@ export class NostrHandler {
   }) {
     const event = createJobResult(result, this.config.privateKey);
     try {
-      const pubs = await Promise.all(this.pool.publish(this.config.relays, event));
-      console.log('Published job result:', event.id, pubs);
+      await Promise.all(this.pool.publish(this.config.relays, event));
     } catch (error) {
-      console.error('Failed to publish job result:', error);
+      console.error(`[${result.requestId.slice(0, 8)}] Failed to publish result:`, error);
     }
   }
 
@@ -154,10 +156,9 @@ export class NostrHandler {
   }) {
     const event = createJobFeedback(feedback, this.config.privateKey);
     try {
-      const pubs = await Promise.all(this.pool.publish(this.config.relays, event));
-      console.log('Published job feedback:', event.id, pubs);
+      await Promise.all(this.pool.publish(this.config.relays, event));
     } catch (error) {
-      console.error('Failed to publish job feedback:', error);
+      console.error(`[${feedback.requestId.slice(0, 8)}] Failed to publish feedback:`, error);
     }
   }
 
