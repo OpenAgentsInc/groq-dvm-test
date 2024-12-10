@@ -171,7 +171,7 @@ async function main() {
     const config: NostrConfig = {
       privateKey: process.env.NOSTR_PRIVATE_KEY,
       relays: ["wss://relay.damus.io"], //process.env.NOSTR_RELAYS.split(','),
-      allowedPubkey: process.env.NOSTR_ALLOWED_PUBKEY // Optional
+      // allowedPubkey: process.env.NOSTR_ALLOWED_PUBKEY // Optional
     };
 
     nostrHandler = new NostrHandler(config, groq);
