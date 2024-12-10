@@ -10,6 +10,11 @@ import { Groq } from 'groq-sdk';
 // Helper function to delay execution
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Helper function to convert hex to Uint8Array
+function hexToBytes(hex: string): Uint8Array {
+  return new Uint8Array(hex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+}
+
 export class NostrHandler {
   private pool: SimplePool;
   private groq: Groq;
@@ -24,7 +29,7 @@ export class NostrHandler {
     this.pool = new SimplePool();
     this.groq = groq;
     this.config = config;
-    this.pubkey = getPublicKey(this.config.privateKey);
+    this.pubkey = getPublicKey(hexToBytes(this.config.privateKey));
   }
 
   async start() {
@@ -47,7 +52,7 @@ export class NostrHandler {
     // Look for our own responses (kind 6050) to find what we've already processed
     const responses = await Promise.all(
       this.config.relays.map(relay => 
-        this.pool.querySync(relay, [{
+        this.pool.querySync([relay], [{
           kinds: [6050],
           since,
           authors: [this.pubkey]
