@@ -1,4 +1,4 @@
-import { Event, SimplePool, getPublicKey } from 'nostr-tools';
+import { Event, SimplePool, getPublicKey, Filter } from 'nostr-tools';
 import WebSocket from 'ws';
 import { NostrConfig, NostrKind } from './types.js';
 import { createHandlerAdvertisement, createJobFeedback, createJobResult, parseJobRequest } from './events.js';
@@ -50,13 +50,16 @@ export class NostrHandler {
     const since = Math.floor(Date.now() / 1000) - (4 * 60 * 60); // Last 4 hours
     
     // Look for our own responses (kind 6050) to find what we've already processed
+    const filter: Filter = {
+      kinds: [6050],
+      since,
+      authors: [this.pubkey],
+      limit: 100
+    };
+
     const responses = await Promise.all(
       this.config.relays.map(relay => 
-        this.pool.querySync([relay], [{
-          kinds: [6050],
-          since,
-          authors: [this.pubkey]
-        }])
+        this.pool.querySync([relay], filter)
       )
     ).then(results => results.flat());
 
@@ -94,12 +97,14 @@ export class NostrHandler {
   }
 
   private subscribeToRequests() {
+    const filter: Filter = {
+      kinds: [5050],
+      since: Math.floor(Date.now() / 1000) - (4 * 60 * 60) // Last 4 hours
+    };
+
     const sub = this.pool.subscribeMany(
       this.config.relays,
-      [{
-        kinds: [5050],
-        since: Math.floor(Date.now() / 1000) - (4 * 60 * 60) // Last 4 hours
-      }],
+      [filter],
       {
         onevent: async (event: Event) => {
           // Skip if we've already processed this event
