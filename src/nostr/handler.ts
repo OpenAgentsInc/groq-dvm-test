@@ -59,7 +59,10 @@ export class NostrHandler {
   private subscribeToRequests() {
     const sub = this.pool.subscribeMany(
       this.config.relays,
-      [{ kinds: [NostrKind.JOB_REQUEST] }],
+      [{
+        kinds: [5050], // Changed from NostrKind.JOB_REQUEST to specifically 5050
+        since: Math.floor(Date.now() / 1000) - (4 * 60 * 60) // Last 4 hours
+      }],
       {
         onevent: async (event: Event) => {
           // Check if we should process this request
