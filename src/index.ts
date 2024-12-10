@@ -170,13 +170,15 @@ async function main() {
   if (process.env.NOSTR_PRIVATE_KEY && process.env.NOSTR_RELAYS) {
     const config: NostrConfig = {
       privateKey: process.env.NOSTR_PRIVATE_KEY,
-      relays: ["wss://relay.damus.io"], //process.env.NOSTR_RELAYS.split(','),
+      relays: process.env.NOSTR_RELAYS.split(','),
       // allowedPubkey: process.env.NOSTR_ALLOWED_PUBKEY // Optional
     };
 
     nostrHandler = new NostrHandler(config, groq);
     await nostrHandler.start();
     console.log('Nostr DVM handler started');
+  } else {
+    console.log('Missing Nostr config, Nostr DVM handler not started');
   }
 
   const transport = new StdioServerTransport();
