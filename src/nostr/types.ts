@@ -1,9 +1,14 @@
-import { Event } from 'nostr-tools';
-
 export interface NostrConfig {
   privateKey: string;
   relays: string[];
-  allowedPubkey?: string; // Optional pubkey to restrict service to
+  allowedPubkey?: string;
+}
+
+export enum NostrKind {
+  JOB_REQUEST = 5050, // Changed from 5100 to 5050
+  JOB_RESULT = 6050,  // Changed from 6100 to 6050
+  JOB_FEEDBACK = 7000,
+  APP_HANDLER = 31990
 }
 
 export interface JobRequest {
@@ -26,7 +31,7 @@ export interface JobResult {
   requestId: string;
   customerPubkey: string;
   content: string | null;
-  request: Event;
+  request: any;
 }
 
 export interface JobFeedback {
@@ -35,12 +40,4 @@ export interface JobFeedback {
   status: 'processing' | 'error' | 'success';
   extraInfo?: string;
   content?: string;
-}
-
-// NIP-90 event kinds
-export const enum NostrKind {
-  JOB_REQUEST = 5050,  // Text generation request
-  JOB_RESULT = 6050,   // Text generation result
-  JOB_FEEDBACK = 7000, // Job status/feedback
-  APP_HANDLER = 31990  // NIP-89 handler advertisement
 }
