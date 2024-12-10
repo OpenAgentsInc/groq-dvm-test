@@ -1,4 +1,4 @@
-import { Event, SimplePool } from 'nostr-tools';
+import { Event, SimplePool, getPublicKey } from 'nostr-tools';
 import WebSocket from 'ws';
 import { NostrConfig, NostrKind } from './types.js';
 import { createHandlerAdvertisement, createJobFeedback, createJobResult, parseJobRequest } from './events.js';
@@ -18,11 +18,13 @@ export class NostrHandler {
   private isProcessing: boolean = false;
   private requestQueue: Event[] = [];
   private processedEvents: Set<string> = new Set();
+  private pubkey: string;
 
   constructor(config: NostrConfig, groq: Groq) {
     this.pool = new SimplePool();
     this.groq = groq;
     this.config = config;
+    this.pubkey = getPublicKey(this.config.privateKey);
   }
 
   async start() {
@@ -43,14 +45,15 @@ export class NostrHandler {
     const since = Math.floor(Date.now() / 1000) - (4 * 60 * 60); // Last 4 hours
     
     // Look for our own responses (kind 6050) to find what we've already processed
-    const responses = await this.pool.list(
-      this.config.relays,
-      [{
-        kinds: [6050],
-        since,
-        authors: [this.pool.ident?.pubkey].filter(Boolean)
-      }]
-    );
+    const responses = await Promise.all(
+      this.config.relays.map(relay => 
+        this.pool.querySync(relay, [{
+          kinds: [6050],
+          since,
+          authors: [this.pubkey]
+        }])
+      )
+    ).then(results => results.flat());
 
     // Extract the original request IDs from the responses
     responses.forEach(response => {
