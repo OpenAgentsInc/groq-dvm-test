@@ -17,6 +17,7 @@ export class NostrHandler {
   private subscriptions: { [key: string]: () => void } = {};
   private isProcessing: boolean = false;
   private requestQueue: Event[] = [];
+  private processedEvents: Set<string> = new Set();
 
   constructor(config: NostrConfig, groq: Groq) {
     this.pool = new SimplePool();
@@ -28,11 +29,39 @@ export class NostrHandler {
     // Connect to relays
     await this.connectToRelays();
 
+    // Load already processed events from the last 4 hours
+    await this.loadProcessedEvents();
+
     // Publish handler advertisement
     await this.publishHandlerAd();
 
     // Subscribe to job requests
     this.subscribeToRequests();
+  }
+
+  private async loadProcessedEvents() {
+    const since = Math.floor(Date.now() / 1000) - (4 * 60 * 60); // Last 4 hours
+    
+    // Look for our own responses (kind 6050) to find what we've already processed
+    const responses = await this.pool.list(
+      this.config.relays,
+      [{
+        kinds: [6050],
+        since,
+        authors: [this.pool.ident?.pubkey].filter(Boolean)
+      }]
+    );
+
+    // Extract the original request IDs from the responses
+    responses.forEach(response => {
+      const requestId = response.tags.find(t => t[0] === 'e')?.[1];
+      if (requestId) {
+        this.processedEvents.add(requestId);
+        console.log(`Loaded processed event: ${requestId.slice(0, 8)}`);
+      }
+    });
+
+    console.log(`Loaded ${this.processedEvents.size} processed events`);
   }
 
   private async connectToRelays() {
@@ -60,11 +89,17 @@ export class NostrHandler {
     const sub = this.pool.subscribeMany(
       this.config.relays,
       [{
-        kinds: [5050], // Changed from NostrKind.JOB_REQUEST to specifically 5050
+        kinds: [5050],
         since: Math.floor(Date.now() / 1000) - (4 * 60 * 60) // Last 4 hours
       }],
       {
         onevent: async (event: Event) => {
+          // Skip if we've already processed this event
+          if (this.processedEvents.has(event.id)) {
+            console.log(`[${event.id.slice(0, 8)}] Already processed, skipping`);
+            return;
+          }
+
           // Check if we should process this request
           if (this.config.allowedPubkey && event.pubkey !== this.config.allowedPubkey) {
             console.log(`[${event.id.slice(0, 8)}] Unauthorized pubkey: ${event.pubkey.slice(0, 8)}`);
@@ -93,6 +128,8 @@ export class NostrHandler {
 
     try {
       await this.handleJobRequest(event);
+      // Mark as processed after successful handling
+      this.processedEvents.add(event.id);
     } catch (error) {
       console.error(`[${event.id.slice(0, 8)}] Failed to process request:`, error);
     } finally {
