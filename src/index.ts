@@ -4,7 +4,7 @@
  * This is an MCP server that provides access to Groq's LLM API.
  * It demonstrates core MCP concepts by implementing a chat completion tool
  * that interfaces with Groq's API.
- * 
+ *
  * It also implements NIP-89/90 support to act as a Nostr Data Vending Machine.
  */
 
@@ -170,7 +170,7 @@ async function main() {
   if (process.env.NOSTR_PRIVATE_KEY && process.env.NOSTR_RELAYS) {
     const config: NostrConfig = {
       privateKey: process.env.NOSTR_PRIVATE_KEY,
-      relays: process.env.NOSTR_RELAYS.split(','),
+      relays: ["wss://relay.damus.io"], //process.env.NOSTR_RELAYS.split(','),
       allowedPubkey: process.env.NOSTR_ALLOWED_PUBKEY // Optional
     };
 
