@@ -33,10 +33,11 @@ export class NostrHandler {
   private SUBSCRIPTION_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
   constructor(config: NostrConfig, groq: Groq) {
-    this.pool = new SimplePool({ getTimeout: 10000, eoseSubTimeout: 60000 });
+    this.pool = new SimplePool();
     this.groq = groq;
     this.config = config;
     this.pubkey = getPublicKey(hexToBytes(this.config.privateKey));
+    this.lastEventTime = Date.now();
   }
 
   async start() {
