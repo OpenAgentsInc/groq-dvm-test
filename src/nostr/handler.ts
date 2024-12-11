@@ -24,6 +24,10 @@ export class NostrHandler {
   private requestQueue: Event[] = [];
   private processedEvents: Set<string> = new Set();
   private pubkey: string;
+  private heartbeatInterval: NodeJS.Timeout | null = null;
+  private reconnectAttempts: { [key: string]: number } = {};
+  private MAX_RECONNECT_ATTEMPTS = 5;
+  private RECONNECT_DELAY = 5000;
 
   constructor(config: NostrConfig, groq: Groq) {
     this.pool = new SimplePool();
@@ -44,6 +48,48 @@ export class NostrHandler {
 
     // Subscribe to job requests
     this.subscribeToRequests();
+
+    // Start heartbeat
+    this.startHeartbeat();
+  }
+
+  private startHeartbeat() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+    }
+
+    this.heartbeatInterval = setInterval(async () => {
+      for (const relay of this.config.relays) {
+        const relayInstance = this.pool.relayByUrl(relay);
+        if (!relayInstance || relayInstance.status !== 1) { // 1 means connected
+          console.log(`Relay ${relay} disconnected, attempting to reconnect...`);
+          await this.reconnectToRelay(relay);
+        }
+      }
+    }, 30000); // Check every 30 seconds
+  }
+
+  private async reconnectToRelay(relay: string) {
+    this.reconnectAttempts[relay] = (this.reconnectAttempts[relay] || 0) + 1;
+
+    if (this.reconnectAttempts[relay] > this.MAX_RECONNECT_ATTEMPTS) {
+      console.error(`Failed to reconnect to ${relay} after ${this.MAX_RECONNECT_ATTEMPTS} attempts`);
+      return;
+    }
+
+    try {
+      await this.pool.ensureRelay(relay);
+      console.log(`Reconnected to relay: ${relay}`);
+      this.reconnectAttempts[relay] = 0; // Reset attempts on successful connection
+      
+      // Resubscribe to events for this relay
+      this.subscribeToRequests([relay]);
+    } catch (error) {
+      console.error(`Failed to reconnect to ${relay}:`, error);
+      // Exponential backoff
+      const delay = this.RECONNECT_DELAY * Math.pow(2, this.reconnectAttempts[relay] - 1);
+      setTimeout(() => this.reconnectToRelay(relay), delay);
+    }
   }
 
   private async loadProcessedEvents() {
@@ -82,6 +128,8 @@ export class NostrHandler {
         console.log(`Connected to relay: ${relay}`);
       } catch (error) {
         console.error(`Failed to connect to relay ${relay}:`, error);
+        // Schedule reconnection attempt
+        setTimeout(() => this.reconnectToRelay(relay), this.RECONNECT_DELAY);
       }
     }
   }
@@ -96,38 +144,56 @@ export class NostrHandler {
     }
   }
 
-  private subscribeToRequests() {
+  private subscribeToRequests(relays?: string[]) {
     const filter: Filter = {
       kinds: [5050],
       since: Math.floor(Date.now() / 1000) - (4 * 60 * 60) // Last 4 hours
     };
 
+    const relaysToUse = relays || this.config.relays;
+
     const sub = this.pool.subscribeMany(
-      this.config.relays,
+      relaysToUse,
       [filter],
       {
         onevent: async (event: Event) => {
-          // Skip if we've already processed this event
-          if (this.processedEvents.has(event.id)) {
-            console.log(`[${event.id.slice(0, 8)}] Already processed, skipping`);
-            return;
-          }
+          try {
+            // Skip if we've already processed this event
+            if (this.processedEvents.has(event.id)) {
+              console.log(`[${event.id.slice(0, 8)}] Already processed, skipping`);
+              return;
+            }
 
-          // Check if we should process this request
-          if (this.config.allowedPubkey && event.pubkey !== this.config.allowedPubkey) {
-            console.log(`[${event.id.slice(0, 8)}] Unauthorized pubkey: ${event.pubkey.slice(0, 8)}`);
-            return;
-          }
+            // Check if we should process this request
+            if (this.config.allowedPubkey && event.pubkey !== this.config.allowedPubkey) {
+              console.log(`[${event.id.slice(0, 8)}] Unauthorized pubkey: ${event.pubkey.slice(0, 8)}`);
+              return;
+            }
 
-          // Add to queue and process if not already processing
-          this.requestQueue.push(event);
-          this.processNextRequest();
+            // Add to queue and process if not already processing
+            this.requestQueue.push(event);
+            this.processNextRequest();
+          } catch (error) {
+            console.error(`Error handling event ${event.id.slice(0, 8)}:`, error);
+          }
+        },
+        oneose: () => {
+          console.log('Subscription closed, attempting to resubscribe...');
+          setTimeout(() => this.subscribeToRequests(relaysToUse), 5000);
+        },
+        onerror: (error) => {
+          console.error('Subscription error:', error);
+          setTimeout(() => this.subscribeToRequests(relaysToUse), 5000);
         }
       }
     );
 
     // Store subscription for cleanup
-    this.subscriptions['requests'] = () => sub.close();
+    const subKey = relaysToUse.join(',');
+    if (this.subscriptions[subKey]) {
+      this.subscriptions[subKey](); // Close existing subscription
+    }
+    this.subscriptions[subKey] = () => sub.close();
   }
 
   private async processNextRequest() {
@@ -254,8 +320,17 @@ export class NostrHandler {
   }
 
   async stop() {
+    // Stop heartbeat
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+
     // Close all subscriptions
     Object.values(this.subscriptions).forEach(close => close());
+    
+    // Clear reconnection attempts
+    this.reconnectAttempts = {};
     
     // Close all relay connections
     this.pool.close(this.config.relays);
