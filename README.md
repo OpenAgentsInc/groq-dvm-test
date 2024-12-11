@@ -1,6 +1,6 @@
-# groq-mcp-test MCP Server
+# groq-dvm-test
 
-A Model Context Protocol server that provides access to Groq's LLM API, with support for Nostr Data Vending Machine (DVM) functionality.
+A Model Context Protocol server that provides access to Groq's LLM API, with support for Nostr Data Vending Machine (DVM) functionality. [Currently focuses on NIP-90]
 
 This is a TypeScript-based MCP server that implements a chat completion interface using Groq's API. It demonstrates core MCP concepts by providing:
 
