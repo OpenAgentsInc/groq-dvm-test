@@ -29,9 +29,11 @@ export class NostrHandler {
   private MAX_RECONNECT_ATTEMPTS = 5;
   private RECONNECT_DELAY = 5000;
   private activeRelays: Set<string> = new Set();
+  private lastEventTime: number = 0;
+  private SUBSCRIPTION_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
   constructor(config: NostrConfig, groq: Groq) {
-    this.pool = new SimplePool();
+    this.pool = new SimplePool({ getTimeout: 10000, eoseSubTimeout: 60000 });
     this.groq = groq;
     this.config = config;
     this.pubkey = getPublicKey(hexToBytes(this.config.privateKey));
@@ -60,6 +62,16 @@ export class NostrHandler {
     }
 
     this.heartbeatInterval = setInterval(async () => {
+      const now = Date.now();
+      
+      // Check if we haven't received events for a while
+      if (now - this.lastEventTime > this.SUBSCRIPTION_TIMEOUT) {
+        console.log('No events received for a while, refreshing subscriptions...');
+        this.refreshSubscriptions();
+        this.lastEventTime = now;
+      }
+
+      // Check relay connections
       for (const relay of this.config.relays) {
         if (!this.activeRelays.has(relay)) {
           console.log(`Relay ${relay} disconnected, attempting to reconnect...`);
@@ -67,6 +79,15 @@ export class NostrHandler {
         }
       }
     }, 30000); // Check every 30 seconds
+  }
+
+  private refreshSubscriptions() {
+    // Close existing subscriptions
+    Object.values(this.subscriptions).forEach(close => close());
+    this.subscriptions = {};
+    
+    // Resubscribe to all relays
+    this.subscribeToRequests();
   }
 
   private async reconnectToRelay(relay: string) {
@@ -150,52 +171,54 @@ export class NostrHandler {
   private subscribeToRequests(relays?: string[]) {
     const filter: Filter = {
       kinds: [5050],
-      since: Math.floor(Date.now() / 1000) - (4 * 60 * 60) // Last 4 hours
+      since: Math.floor(Date.now() / 1000) - 60 // Last minute, to avoid duplicate events
     };
 
     const relaysToUse = relays || this.config.relays;
 
-    const sub = this.pool.subscribeMany(
-      relaysToUse,
-      [filter],
-      {
-        onevent: async (event: Event) => {
-          try {
-            // Skip if we've already processed this event
-            if (this.processedEvents.has(event.id)) {
-              console.log(`[${event.id.slice(0, 8)}] Already processed, skipping`);
-              return;
-            }
+    try {
+      const sub = this.pool.subscribeMany(
+        relaysToUse,
+        [filter],
+        {
+          onevent: async (event: Event) => {
+            try {
+              this.lastEventTime = Date.now();
 
-            // Check if we should process this request
-            if (this.config.allowedPubkey && event.pubkey !== this.config.allowedPubkey) {
-              console.log(`[${event.id.slice(0, 8)}] Unauthorized pubkey: ${event.pubkey.slice(0, 8)}`);
-              return;
-            }
+              // Skip if we've already processed this event
+              if (this.processedEvents.has(event.id)) {
+                console.log(`[${event.id.slice(0, 8)}] Already processed, skipping`);
+                return;
+              }
 
-            // Add to queue and process if not already processing
-            this.requestQueue.push(event);
-            this.processNextRequest();
-          } catch (error) {
-            console.error(`Error handling event ${event.id.slice(0, 8)}:`, error);
+              // Check if we should process this request
+              if (this.config.allowedPubkey && event.pubkey !== this.config.allowedPubkey) {
+                console.log(`[${event.id.slice(0, 8)}] Unauthorized pubkey: ${event.pubkey.slice(0, 8)}`);
+                return;
+              }
+
+              // Add to queue and process if not already processing
+              this.requestQueue.push(event);
+              this.processNextRequest();
+            } catch (error) {
+              console.error(`Error handling event ${event.id.slice(0, 8)}:`, error);
+            }
           }
-        },
-        oneose: () => {
-          console.log('Subscription closed, attempting to resubscribe...');
-          for (const relay of relaysToUse) {
-            this.activeRelays.delete(relay);
-          }
-          setTimeout(() => this.subscribeToRequests(relaysToUse), 5000);
         }
-      }
-    );
+      );
 
-    // Store subscription for cleanup
-    const subKey = relaysToUse.join(',');
-    if (this.subscriptions[subKey]) {
-      this.subscriptions[subKey](); // Close existing subscription
+      // Store subscription for cleanup
+      const subKey = relaysToUse.join(',');
+      if (this.subscriptions[subKey]) {
+        this.subscriptions[subKey](); // Close existing subscription
+      }
+      this.subscriptions[subKey] = () => sub.close();
+
+    } catch (error) {
+      console.error('Failed to create subscription:', error);
+      // Schedule a retry
+      setTimeout(() => this.subscribeToRequests(relaysToUse), this.RECONNECT_DELAY);
     }
-    this.subscriptions[subKey] = () => sub.close();
   }
 
   private async processNextRequest() {
