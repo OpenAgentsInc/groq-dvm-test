@@ -28,6 +28,7 @@ export class NostrHandler {
   private reconnectAttempts: { [key: string]: number } = {};
   private MAX_RECONNECT_ATTEMPTS = 5;
   private RECONNECT_DELAY = 5000;
+  private activeRelays: Set<string> = new Set();
 
   constructor(config: NostrConfig, groq: Groq) {
     this.pool = new SimplePool();
@@ -60,8 +61,7 @@ export class NostrHandler {
 
     this.heartbeatInterval = setInterval(async () => {
       for (const relay of this.config.relays) {
-        const relayInstance = this.pool.relayByUrl(relay);
-        if (!relayInstance || relayInstance.status !== 1) { // 1 means connected
+        if (!this.activeRelays.has(relay)) {
           console.log(`Relay ${relay} disconnected, attempting to reconnect...`);
           await this.reconnectToRelay(relay);
         }
@@ -81,14 +81,16 @@ export class NostrHandler {
       await this.pool.ensureRelay(relay);
       console.log(`Reconnected to relay: ${relay}`);
       this.reconnectAttempts[relay] = 0; // Reset attempts on successful connection
+      this.activeRelays.add(relay);
       
       // Resubscribe to events for this relay
       this.subscribeToRequests([relay]);
     } catch (error) {
       console.error(`Failed to reconnect to ${relay}:`, error);
+      this.activeRelays.delete(relay);
       // Exponential backoff
-      const delay = this.RECONNECT_DELAY * Math.pow(2, this.reconnectAttempts[relay] - 1);
-      setTimeout(() => this.reconnectToRelay(relay), delay);
+      const backoffDelay = this.RECONNECT_DELAY * Math.pow(2, this.reconnectAttempts[relay] - 1);
+      setTimeout(() => this.reconnectToRelay(relay), backoffDelay);
     }
   }
 
@@ -126,6 +128,7 @@ export class NostrHandler {
       try {
         await this.pool.ensureRelay(relay);
         console.log(`Connected to relay: ${relay}`);
+        this.activeRelays.add(relay);
       } catch (error) {
         console.error(`Failed to connect to relay ${relay}:`, error);
         // Schedule reconnection attempt
@@ -179,10 +182,9 @@ export class NostrHandler {
         },
         oneose: () => {
           console.log('Subscription closed, attempting to resubscribe...');
-          setTimeout(() => this.subscribeToRequests(relaysToUse), 5000);
-        },
-        onerror: (error) => {
-          console.error('Subscription error:', error);
+          for (const relay of relaysToUse) {
+            this.activeRelays.delete(relay);
+          }
           setTimeout(() => this.subscribeToRequests(relaysToUse), 5000);
         }
       }
@@ -331,6 +333,9 @@ export class NostrHandler {
     
     // Clear reconnection attempts
     this.reconnectAttempts = {};
+    
+    // Clear active relays
+    this.activeRelays.clear();
     
     // Close all relay connections
     this.pool.close(this.config.relays);
